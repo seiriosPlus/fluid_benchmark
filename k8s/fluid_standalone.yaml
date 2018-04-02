@@ -1,0 +1,71 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: images-trainer-standlone
+spec:
+  parallelism: 1
+  completions: 1
+  template:
+    metadata:
+      labels:
+        paddle-job: images-standlone
+    spec:
+      imagePullSecrets:
+      - name: tangwei12
+      hostNetwork: true
+      serviceAccountName: paddle
+      containers:
+      - name: trainer
+        image: "registry.baidu.com/tangwei12/models:dev_1"
+        imagePullPolicy: Always
+        command: ["python", "/models/image_classification/se_resnext_cluster.py"]
+        #command: ["sleep", "86400"]
+        env:
+        - name: PADDLE_JOB_NAME
+          value: images-standlone
+        - name: TRAINING_ROLE
+          value: "TRAINER"
+        - name: TRAINERS
+          value: "4"
+        - name: PSERVERS
+          value: "2"
+        - name: TOPOLOGY
+          value: ""
+        - name: ENTRY
+          value: "python /models/image_classification/mobilenet.py --local 1"
+        - name: TRAINER_PACKAGE
+          value: "/models"
+        - name: PADDLE_INIT_PORT
+          value: "30236"
+        - name: PADDLE_INIT_NICS
+          value: "xgbe0"
+        - name: PADDLE_INIT_TRAINER_COUNT
+          value: "1"
+        - name: PADDLE_INIT_PORTS_NUM
+          value: "1"
+        - name: PADDLE_INIT_PORTS_NUM_FOR_SPARSE
+          value: "1"
+        - name: PADDLE_INIT_NUM_GRADIENT_SERVERS
+          value: "20"
+        - name: PADDLE_INIT_NUM_PASSES
+          value: "1"
+        - name: PADDLE_INIT_USE_GPU
+          value: "0"
+        - name: LD_LIBRARY_PATH
+          value: "/usr/local/lib:/usr/local/nvidia/lib64"
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: "metadata.namespace"
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: "status.podIP"
+        resources:
+          requests:
+            memory: 80Gi
+            cpu: 4
+          limits:
+            memory: 80Gi
+            cpu: 4
+      restartPolicy: Never

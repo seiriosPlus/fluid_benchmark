@@ -1,0 +1,72 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: images-trainer
+spec:
+  parallelism: 4
+  completions: 4
+  template:
+    metadata:
+      labels:
+        paddle-job: images
+    spec:
+      imagePullSecrets:
+      - name: tangwei12
+      hostNetwork: true
+      serviceAccountName: paddle
+      containers:
+      - name: trainer
+        image: "registry.baidu.com/tangwei12/models:dev"
+        imagePullPolicy: Always
+        command: ["paddle_k8s", "start_fluid"]
+        env:
+        - name: PADDLE_JOB_NAME
+          value: images
+        - name: TRAINING_ROLE
+          value: "TRAINER"
+        - name: TRAINERS
+          value: "4"
+        - name: PSERVERS
+          value: "4"
+        - name: TOPOLOGY
+          value: ""
+        - name: ENTRY
+          value: "python /models/image_classification/mobilenet.py --local 0 --batch_size 4"
+        - name: TRAINER_PACKAGE
+          value: "/models"
+        - name: PADDLE_INIT_PSERVER_PORT
+          value: "30236"
+        - name: PADDLE_INIT_TRAINER_PORT
+          value: "31236"
+        - name: PADDLE_INIT_NICS
+          value: "xgbe0"
+        - name: PADDLE_INIT_TRAINER_COUNT
+          value: "1"
+        - name: PADDLE_INIT_PORTS_NUM
+          value: "1"
+        - name: PADDLE_INIT_PORTS_NUM_FOR_SPARSE
+          value: "1"
+        - name: PADDLE_INIT_NUM_GRADIENT_SERVERS
+          value: "20"
+        - name: PADDLE_INIT_NUM_PASSES
+          value: "1"
+        - name: PADDLE_INIT_USE_GPU
+          value: "0"
+        - name: LD_LIBRARY_PATH
+          value: "/usr/local/lib:/usr/local/nvidia/lib64"
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: "metadata.namespace"
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: "status.podIP"
+        resources:
+          requests:
+            memory: 40Gi
+            cpu: 2
+          limits:
+            memory: 40Gi
+            cpu: 2
+      restartPolicy: Never
