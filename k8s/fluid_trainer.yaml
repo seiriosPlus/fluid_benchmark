@@ -1,17 +1,17 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: images-trainer
+  name: mobilenet-trainer
 spec:
   parallelism: 4
-  completions: 4
+  completions: 4 
   template:
     metadata:
       labels:
-        paddle-job: images
+        paddle-job: mobilenet
     spec:
       imagePullSecrets:
-      - name: tangwei12
+      - name: tangwei12 
       hostNetwork: true
       serviceAccountName: paddle
       containers:
@@ -19,9 +19,17 @@ spec:
         image: "registry.baidu.com/tangwei12/models:dev"
         imagePullPolicy: Always
         command: ["paddle_k8s", "start_fluid"]
+        #command: ["sleep", "3600"]
+        ports:
+        - name: jobport-31236
+          containerPort: 31236
         env:
+        - name: GLOG_v
+          value: "1"
+        - name: GLOG_logtostderr
+          value: "1"
         - name: PADDLE_JOB_NAME
-          value: images
+          value: mobilenet
         - name: TRAINING_ROLE
           value: "TRAINER"
         - name: TRAINERS
@@ -31,7 +39,7 @@ spec:
         - name: TOPOLOGY
           value: ""
         - name: ENTRY
-          value: "python /models/image_classification/mobilenet.py --local 0 --batch_size 4"
+          value: "python /models/image_classification/mobilenet.py --local 0 --batch_size 256"
         - name: TRAINER_PACKAGE
           value: "/models"
         - name: PADDLE_INIT_PSERVER_PORT
@@ -65,8 +73,8 @@ spec:
         resources:
           requests:
             memory: 40Gi
-            cpu: 2
+            cpu: 4 
           limits:
             memory: 40Gi
-            cpu: 2
+            cpu: 4
       restartPolicy: Never

@@ -1,13 +1,13 @@
 apiVersion: extensions/v1beta1
 kind: ReplicaSet
 metadata:
-  name: images-pserver
+  name: mobilenet-pserver
 spec:
-  replicas: 4
+  replicas: 4 
   template:
     metadata:
       labels:
-        paddle-job-pserver: images
+        paddle-job-pserver: mobilenet
     spec:
       hostNetwork: true
       serviceAccountName: paddle
@@ -21,12 +21,12 @@ spec:
         - name: jobport-30236
           containerPort: 30236
         env:
-        - name: GLOG_v
+        - name: GLOG_v 
           value: "2"
         - name: GLOG_logtostderr
           value: "1"
         - name: PADDLE_JOB_NAME
-          value: images
+          value: mobilenet
         - name: MKL_NUM_THREADS
           value: "1"
         - name: TRAINING_ROLE

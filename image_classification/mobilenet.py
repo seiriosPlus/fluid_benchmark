@@ -3,8 +3,10 @@ import sys
 import argparse
 import time
 
-import paddle.v2 as paddle
+import paddle as paddle
 import paddle.fluid as fluid
+import paddle.fluid.core as core
+import paddle.fluid.profiler as profiler
 from paddle.fluid.initializer import MSRA
 from paddle.fluid.param_attr import ParamAttr
 
@@ -29,6 +31,15 @@ parser.add_argument(
     type=int,
     default=40,
     help='Whether to run as local mode.')
+
+parser.add_argument(
+    '--device',
+    type=str,
+    default='CPU',
+    choices=['CPU', 'GPU'],
+    help="The device type.")
+
+parser.add_argument('--device_id', type=int, default=0, help="The device id.")
 
 parser.add_argument(
     '--num_passes',
@@ -215,6 +226,7 @@ def local_train(learning_rate, batch_size, num_passes, model_save_dir='model'):
         learning_rate=learning_rate,
         momentum=0.9,
         regularization=fluid.regularizer.L2Decay(5 * 1e-5))
+#    optimizer = fluid.optimizer.SGD(learning_rate=learning_rate)
     opts = optimizer.minimize(avg_cost)
 
     b_size_var = fluid.layers.create_tensor(dtype='int64')
@@ -225,7 +237,8 @@ def local_train(learning_rate, batch_size, num_passes, model_save_dir='model'):
         inference_program = fluid.io.get_inference_program(
             target_vars=[b_acc_var, b_size_var])
 
-    place = fluid.CPUPlace()
+    place = core.CPUPlace() if args.device == 'CPU' else core.CUDAPlace(
+        args.device_id)
     exe = fluid.Executor(place)
     exe.run(fluid.default_startup_program())
 
@@ -249,16 +262,16 @@ def local_train(learning_rate, batch_size, num_passes, model_save_dir='model'):
             print("Pass {0}, batch {1}, loss {2}, acc {3}".format(
                 pass_id, batch_id, loss[0], acc[0]))
 
-        #test_pass_acc_evaluator.reset()
-        #for data in test_reader():
-        #    loss, acc, size = exe.run(
-        #        inference_program,
-        #        feed=feeder.feed(data),
-        #        fetch_list=[b_acc_var, b_size_var])
-        #    test_pass_acc_evaluator.add(value=acc, weight=size)
+        test_pass_acc_evaluator.reset()
+        for data in test_reader():
+            acc, size = exe.run(
+                inference_program,
+                feed=feeder.feed(data),
+                fetch_list=[b_acc_var, b_size_var])
+            test_pass_acc_evaluator.add(value=acc, weight=size)
         print("End pass {0}, train_acc {1}, test_acc {2}, cost {3} second".format(
             pass_id,
-            train_pass_acc_evaluator.eval(), 0, time.clock() - start))
+            train_pass_acc_evaluator.eval(), test_pass_acc_evaluator.eval(), time.clock() - start))
         #if pass_id % 10 == 0:
         #    model_path = os.path.join(model_save_dir, str(pass_id))
         #    print 'save models to %s' % (model_path)
@@ -277,7 +290,8 @@ def cluster_train(learning_rate, batch_size, num_passes, model_save_dir='model')
         regularization=fluid.regularizer.L2Decay(5 * 1e-5))
     optimize_ops, params_grads = optimizer.minimize(avg_cost)
 
-    place = fluid.CPUPlace()
+    place = core.CPUPlace() if args.device == 'CPU' else core.CUDAPlace(
+        args.device_id)
     exe = fluid.Executor(place)
 
     pport = os.getenv("PADDLE_INIT_PSERVER_PORT", "6174")
@@ -318,43 +332,42 @@ def cluster_train(learning_rate, batch_size, num_passes, model_save_dir='model')
         with fluid.program_guard(inference_program):
             inference_program = fluid.io.get_inference_program(
                 target_vars=[b_acc_var, b_size_var])
-
+    
         exe.run(fluid.default_startup_program())
-
+    
         train_reader = paddle.batch(
             paddle.dataset.flowers.train(), batch_size=batch_size)
         test_reader = paddle.batch(
             paddle.dataset.flowers.test(), batch_size=batch_size)
         feeder = fluid.DataFeeder(place=place, feed_list=[image, label])
 
+        train_proc = t.get_trainer_program()
+    
         train_pass_acc_evaluator = fluid.average.WeightedAverage()
         test_pass_acc_evaluator = fluid.average.WeightedAverage()
-        for pass_id in range(num_passes):
-            start = time.clock()
-            train_pass_acc_evaluator.reset()
-            for batch_id, data in enumerate(train_reader()):
-                loss, acc, size = exe.run(
-                    t.get_trainer_program(),
-                    feed=feeder.feed(data),
-                    fetch_list=[avg_cost, b_acc_var, b_size_var])
-                train_pass_acc_evaluator.add(value=acc, weight=size)
-                print("Pass {0}, batch {1}, loss {2}, acc {3}".format(
-                    pass_id, batch_id, loss[0], acc[0]))
-
-            #test_pass_acc_evaluator.reset()
-            #for data in test_reader():
-            #    loss, acc, size = exe.run(
-            #        inference_program,
-            #        feed=feeder.feed(data),
-            #        fetch_list=[b_acc_var, b_size_var])
-            #    test_pass_acc_evaluator.add(value=acc, weight=size)
-            print("End pass {0}, train_acc {1}, test_acc {2}, cost {3} second".format(
-                pass_id,
-                train_pass_acc_evaluator.eval(), 0, time.clock() - start))
-            #if pass_id % 10 == 0:
-            #    model_path = os.path.join(model_save_dir, str(pass_id))
-            #    print 'save models to %s' % (model_path)
-            #    fluid.io.save_inference_model(model_path, ['image'], [out], exe)
+        with profiler.profiler(args.device, 'total', "profilers.log"):
+            for pass_id in range(num_passes):
+                start = time.clock()
+                train_pass_acc_evaluator.reset()
+                for batch_id, data in enumerate(train_reader()):
+                    loss, acc, size = exe.run(
+                        train_proc,
+                        feed=feeder.feed(data),
+                        fetch_list=[avg_cost, b_acc_var, b_size_var])
+                    train_pass_acc_evaluator.add(value=acc, weight=size)
+                    print("Pass {0}, batch {1}, loss {2}, acc {3}".format(
+                        pass_id, batch_id, loss[0], acc[0]))
+    
+                test_pass_acc_evaluator.reset()
+                for data in test_reader():
+                    acc, size = exe.run(
+                        inference_program,
+                        feed=feeder.feed(data),
+                        fetch_list=[b_acc_var, b_size_var])
+                    test_pass_acc_evaluator.add(value=acc, weight=size)
+                print("End pass {0}, train_acc {1}, test_acc {2}, cost {3} second".format(
+                   pass_id,
+                   train_pass_acc_evaluator.eval(), test_pass_acc_evaluator.eval(), time.clock() - start))
 
 def print_arguments():
     print('-----------  Configuration Arguments -----------')
@@ -369,3 +382,4 @@ if __name__ == '__main__':
         local_train(learning_rate=0.005, batch_size=args.batch_size, num_passes=args.num_passes)
     else:
         cluster_train(learning_rate=0.005, batch_size=args.batch_size, num_passes=args.num_passes)
+

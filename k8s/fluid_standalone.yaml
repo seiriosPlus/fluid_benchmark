@@ -1,28 +1,28 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: images-trainer-standlone
+  name: mobilenet-trainer-standlone
 spec:
-  parallelism: 1
+  parallelism: 1 
   completions: 1
   template:
     metadata:
       labels:
-        paddle-job: images-standlone
+        paddle-job: mobilenet-standlone
     spec:
       imagePullSecrets:
-      - name: tangwei12
+      - name: tangwei12 
       hostNetwork: true
       serviceAccountName: paddle
       containers:
       - name: trainer
-        image: "registry.baidu.com/tangwei12/models:dev_1"
+        image: "registry.baidu.com/tangwei12/models:dev"
         imagePullPolicy: Always
-        command: ["python", "/models/image_classification/se_resnext_cluster.py"]
-        #command: ["sleep", "86400"]
+        #command: ["python", "/models/image_classification/se_resnext.py", "40"]
+        command: ["sleep", "86400"]
         env:
         - name: PADDLE_JOB_NAME
-          value: images-standlone
+          value: mobilenet-standlone
         - name: TRAINING_ROLE
           value: "TRAINER"
         - name: TRAINERS
@@ -63,9 +63,9 @@ spec:
               fieldPath: "status.podIP"
         resources:
           requests:
-            memory: 80Gi
+            memory: 40Gi
             cpu: 4
           limits:
-            memory: 80Gi
+            memory: 40Gi
             cpu: 4
       restartPolicy: Never
