@@ -108,9 +108,8 @@ def vgg16_bn_drop(input):
 
     drop = fluid.layers.dropout(x=conv5, dropout_prob=0.5)
     fc1 = fluid.layers.fc(input=drop, size=4096, act=None)
-#    bn = fluid.layers.batch_norm(input=fc1, act='relu')
-#    drop2 = fluid.layers.dropout(x=bn, dropout_prob=0.5)
-    drop2 = fluid.layers.dropout(x=fc1, dropout_prob=0.5)
+    bn = fluid.layers.batch_norm(input=fc1, act='relu')
+    drop2 = fluid.layers.dropout(x=bn, dropout_prob=0.5)
     fc2 = fluid.layers.fc(input=drop2, size=4096, act=None)
     return fc2
 
@@ -153,6 +152,11 @@ def main():
     optimizer = fluid.optimizer.Adam(learning_rate=args.learning_rate)
     optimize_ops, params_grads = optimizer.minimize(avg_cost)
 
+    # Initialize executor
+    place = core.CPUPlace() if args.device == 'CPU' else core.CUDAPlace(
+        args.device_id)
+    exe = fluid.Executor(place)
+
     # test
     def test(exe):
         test_pass_acc = fluid.average.WeightedAverage()
@@ -162,19 +166,15 @@ def main():
             y_data = np.array(map(lambda x: x[1], data)).astype("int64")
             y_data = y_data.reshape([-1, 1])
 
-            acc, b_size = test_exe.run(
+            outs = exe.run(inference_program,
                            feed={"pixel": img_data,
                                  "label": y_data},
-                           fetch_list=[batch_acc.name, batch_size.name])
-
-            np_acc = np.array(acc)
-            np_b_size = np.array(b_size)
-
-            test_pass_acc.add(value=float(np.mean(np_acc)), weight=float(np.mean(np_b_size)))
+                           fetch_list=[batch_acc, batch_size])
+            test_pass_acc.add(value=np.array(outs[0]), weight=np.array(outs[1]))
 
         return test_pass_acc.eval()
 
-    def train_loop(train_exe, test_exe):
+    def train_loop(exe, trainer_prog):
         iters = 0
         ts = time.time()
         train_pass_acc = fluid.average.WeightedAverage()
@@ -191,47 +191,31 @@ def main():
                 y_data = np.array(map(lambda x: x[1], data)).astype("int64")
                 y_data = y_data.reshape([-1, 1])
 
-                loss, acc, b_size = train_exe.run(
+                loss, acc, b_size = exe.run(
+                    trainer_prog,
                     feed={"pixel": img_data,
                           "label": y_data},
-                    fetch_list=[avg_cost.name, batch_acc.name, batch_size.name])
-
+                    fetch_list=[avg_cost, batch_acc, batch_size])
                 iters += 1
                 num_samples += len(data)
-
-                np_acc = np.array(acc)
-                np_loss = np.array(loss)
-                np_b_size = np.array(b_size)
-
-                train_pass_acc.add(value=float(np.mean(np_acc)), weight=float(np.mean(np_b_size)))
+                train_pass_acc.add(value=acc, weight=b_size)
                 print(
                     "Pass = %d, Iters = %d, Loss = %f, Accuracy = %f, Speed = %.2f img/s"
-                    % (pass_id, iters, np.mean(np_loss), np.mean(np_acc),
+                    % (pass_id, iters, loss, acc,
                        len(data) / (time.time() - ts))
                 )  # The accuracy is the accumulation of batches, but not the current batch.
 
             pass_elapsed = time.time() - start_time
             pass_train_acc = train_pass_acc.eval()
-            pass_test_acc = test(test_exe)
+            pass_test_acc = test(exe)
             print(
-                "Pass = %d, Training performance = %f imgs/s, Train accuracy = %f, Test accuracy = %f\n"
-                % (pass_id, num_samples / pass_elapsed, pass_train_acc,
+                "Pass = %d, Elaspsed= %d, Training performance = %f imgs/s, Train accuracy = %f, Test accuracy = %f\n"
+                % (pass_id, pass_elapsed, num_samples / pass_elapsed, pass_train_acc,
                    pass_test_acc))
-
-
-    # Initialize executor
-    use_gpu = False if args.device == 'CPU' else True
 
     if args.local:
         # Parameter initialization
-        place = core.CPUPlace() if not use_gpu else core.CUDAPlace(args.device_id)
-        startup_exe = fluid.Executor(place)
-        startup_exe.run(fluid.default_startup_program())
-        exe = fluid.ParallelExecutor(use_gpu, avg_cost.name)
-
-        train_exe = fluid.ParallelExecutor(use_cuda=True, loss_name=avg_cost.name)
-        test_program = fluid.default_main_program().clone(for_test=True)
-        test_exe = fluid.ParallelExecutor(use_cuda=True, main_program=test_program, share_vars_from=train_exe)
+        exe.run(fluid.default_startup_program())
 
         # data reader
         train_reader = paddle.batch(
@@ -244,7 +228,7 @@ def main():
             paddle.dataset.cifar.test10()
             if args.data_set == 'cifar10' else paddle.dataset.flowers.test(),
             batch_size=args.batch_size)
-        train_loop(train_exe, test_exe)
+        train_loop(exe, fluid.default_main_program())
     else:
         standalone = int(os.getenv("STANDALONE", 0))
 
@@ -277,21 +261,20 @@ def main():
         t.transpile(
             optimize_ops,
             params_grads,
-            trainer_id=trainer_id,
-            pservers=pserver_endpoints,
+            trainer_id=args.task_index,
+            pservers=args.ps_hosts,
             trainers=trainers)
 
         if training_role == "PSERVER":
             pserver_prog = t.get_pserver_program(current_endpoint)
             pserver_startup = t.get_startup_program(current_endpoint,
                                                     pserver_prog)
-
-            place = core.CPUPlace() if not use_gpu else core.CUDAPlace(args.device_id)
-            exe = fluid.Executor(place)
-
             exe.run(pserver_startup)
             exe.run(pserver_prog)
         elif training_role == "TRAINER":
+            # Parameter initialization
+            exe.run(fluid.default_startup_program())
+
             # data reader
             train_reader = paddle.batch(
                 paddle.reader.shuffle(
@@ -304,15 +287,10 @@ def main():
                 paddle.dataset.flowers.test(),
                 batch_size=args.batch_size)
 
-            feeder = fluid.DataFeeder(feed_list=[images, label], place=place)
-
-            # Parameter initialization
-            place = core.CPUPlace() if not use_gpu else core.CUDAPlace(args.device_id)
-            startup_exe = fluid.Executor(place)
-            startup_exe.run(fluid.default_startup_program())
-            exe = fluid.ParallelExecutor(use_gpu, avg_cost.name)
-
             trainer_prog = t.get_trainer_program()
+            feeder = fluid.DataFeeder(feed_list=[images, label], place=place)
+            # TODO(typhoonzero): change trainer startup program to fetch parameters from pserver
+            exe.run(fluid.default_startup_program())
             train_loop(exe, trainer_prog)
         else:
             print("environment var TRAINER_ROLE should be TRAINER os PSERVER")
