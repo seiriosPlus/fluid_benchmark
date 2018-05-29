@@ -33,6 +33,21 @@ num_passes = 200
 batch_size = 40
 optimize_choose = 2
 
+def chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
+
+def accuracy_data(trainers, trainer_id, datas):
+    partitions = list(chunks(range(len(datas)), len(datas)/trainers))
+
+    data = []
+
+    for id in partitions[trainer_id]:
+        data.append(datas[id])
+
+    return data
+
 
 def conv_bn_layer(input, num_filters, filter_size, stride=1, groups=1,
                   act=None):
@@ -45,9 +60,8 @@ def conv_bn_layer(input, num_filters, filter_size, stride=1, groups=1,
         groups=groups,
         act=None,
         bias_attr=False)
-    #return fluid.layers.batch_norm(input=conv, act=act)
-    return conv 
-
+    #return fluid.layers.layer_norm(input=conv, act=act)
+    return fluid.layers.batch_norm(input=conv, act=act)
 
 def squeeze_excitation(input, num_channels, reduction_ratio):
     pool = fluid.layers.pool2d(
@@ -155,7 +169,6 @@ def SE_ResNeXt(input, class_dim, infer=False, layers=50):
 
 
 def serial_executor(
-                    learning_rate,
                     init_model=None,
                     model_save_dir='model',
                     parallel=True,
@@ -172,8 +185,9 @@ def serial_executor(
     out = SE_ResNeXt(input=image, class_dim=class_dim, layers=layers)
     cost = fluid.layers.cross_entropy(input=out, label=label)
     avg_cost = fluid.layers.mean(x=cost)
-    acc_top1 = fluid.layers.accuracy(input=out, label=label, k=1)
-    acc_top5 = fluid.layers.accuracy(input=out, label=label, k=5)
+
+    size_var = fluid.layers.create_tensor(dtype='int64')
+    acc_var = fluid.layers.accuracy(input=out, label=label, total=size_var)
 
     if lr_strategy is None:
         optimizer = fluid.optimizer.Momentum(
@@ -208,7 +222,7 @@ def serial_executor(
     inference_program = fluid.default_main_program().clone()
     with fluid.program_guard(inference_program):
         inference_program = fluid.io.get_inference_program(
-            [avg_cost, acc_top1, acc_top5])
+            [avg_cost, acc_var, size_var])
 
     train_reader = paddle.batch(
         paddle.dataset.flowers.train(), batch_size=batch_size)
@@ -220,6 +234,7 @@ def serial_executor(
     feeder = fluid.DataFeeder(place=place, feed_list=[image, label])
 
     if not is_cluster:
+        exe.run(fluid.default_startup_program())
         train_proc = fluid.default_main_program()
     else:
         if standalone:
@@ -270,24 +285,28 @@ def serial_executor(
         start = time.time()
         train_info = [[], [], []]
         test_info = [[], [], []]
+
         for batch_id, data in enumerate(train_reader()):
             t1 = time.time()
+
+            if is_accuracy:
+                data = accuracy_data(trainers, trainer_id, data)
+
             loss, acc1, acc5 = exe.run(
                 train_proc,
                 feed=feeder.feed(data),
-                fetch_list=[avg_cost, acc_top1, acc_top5])
+                fetch_list=[avg_cost, acc_var, size_var])
             t2 = time.time()
             period = t2 - t1
             train_info[0].append(loss[0])
             train_info[1].append(acc1[0])
             train_info[2].append(acc5[0])
-            if batch_id % 10 == 0:
-                print("Pass {0}, trainbatch {1}, loss {2}, \
-                       acc1 {3}, acc5 {4} time {5}"
-                                                   .format(pass_id, \
-                       batch_id, loss[0], acc1[0], acc5[0], \
-                       "%2.2f sec" % period))
-                sys.stdout.flush()
+            print("Pass {0}, batch {1}, loss {2}, \
+                   acc {3}, size {4} time {5}"
+                                               .format(pass_id, \
+                   batch_id, loss[0], acc1[0], acc5[0], \
+                   "%2.2f sec" % period))
+            sys.stdout.flush()
 
             if is_debug:
                 print("Just for Debug, break loop, to speed up test")
@@ -302,7 +321,7 @@ def serial_executor(
             acc1, acc5 = exe.run(
                 inference_program,
                 feed=feeder.feed(data),
-                fetch_list=[acc_top1, acc_top5])
+                fetch_list=[acc_var, size_var])
             t2 = time.time()
             period = t2 - t1
             test_info[0].append(0.0)
@@ -310,7 +329,7 @@ def serial_executor(
             test_info[2].append(acc5[0])
             if batch_id % 10 == 0:
                 print("Pass {0},testbatch {1},loss {2}, \
-                       acc1 {3},acc5 {4},time {5}"
+                       acc {3}, size {4},time {5}"
                                                   .format(pass_id, \
                        batch_id, 0.0, acc1[0], acc5[0], \
                        "%2.2f sec" % period))
@@ -323,8 +342,8 @@ def serial_executor(
         test_acc1 = np.array(test_info[1]).mean()
         test_acc5 = np.array(test_info[2]).mean()
 
-        print("End pass {0}, train_loss {1}, train_acc1 {2}, train_acc5 {3}, \
-               test_loss {4}, test_acc1 {5}, test_acc5 {6}, time period sec {7}"
+        print("End pass {0}, train_loss {1}, train_acc {2}, train_acc_size {3}, \
+               test_loss {4}, test_acc {5}, test_acc_size {6}, time period sec {7}"
                                                            .format(pass_id, \
               train_loss, train_acc1, train_acc5, test_loss, test_acc1, \
               test_acc5, time.time()-start))

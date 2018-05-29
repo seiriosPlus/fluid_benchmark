@@ -48,6 +48,12 @@ parser.add_argument(
     help='Whether to run as local mode.')
 
 parser.add_argument(
+    '--accuracy',
+    type=str2bool,
+    default=False,
+    help='accuracy mode, in this mode, will split input data')
+
+parser.add_argument(
     "--ps_hosts",
     type=str,
     default="",
@@ -83,7 +89,8 @@ def conv_bn_layer(input,
         use_cudnn=use_cudnn,
         param_attr=parameter_attr,
         bias_attr=False)
-    return fluid.layers.batch_norm(input=conv, act=act)
+    #return fluid.layers.batch_norm(input=conv, act=act)
+    return conv 
 
 
 def depthwise_separable(input, num_filters1, num_filters2, num_groups, stride,
@@ -250,12 +257,15 @@ def local_train(learning_rate, batch_size, num_passes, model_save_dir='model'):
 
     train_pass_acc_evaluator = fluid.average.WeightedAverage()
     test_pass_acc_evaluator = fluid.average.WeightedAverage()
+
+    train_proc = fluid.default_main_program()
+
     for pass_id in range(num_passes):
         start = time.clock()
         train_pass_acc_evaluator.reset()
         for batch_id, data in enumerate(train_reader()):
             loss, acc, size = exe.run(
-                fluid.default_main_program(),
+                train_proc,
                 feed=feeder.feed(data),
                 fetch_list=[avg_cost, b_acc_var, b_size_var])
             train_pass_acc_evaluator.add(value=acc, weight=size)
@@ -270,12 +280,26 @@ def local_train(learning_rate, batch_size, num_passes, model_save_dir='model'):
                 fetch_list=[b_acc_var, b_size_var])
             test_pass_acc_evaluator.add(value=acc, weight=size)
         print("End pass {0}, train_acc {1}, test_acc {2}, cost {3} second".format(
-            pass_id,
-            train_pass_acc_evaluator.eval(), test_pass_acc_evaluator.eval(), time.clock() - start))
-        #if pass_id % 10 == 0:
-        #    model_path = os.path.join(model_save_dir, str(pass_id))
-        #    print 'save models to %s' % (model_path)
-        #    fluid.io.save_inference_model(model_path, ['image'], [out], exe)
+           pass_id,
+           train_pass_acc_evaluator.eval(), test_pass_acc_evaluator.eval(), time.clock() - start))
+
+
+def chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(l), n):
+        yield l[i:i + n]
+
+def accuracy_data(trainers, trainer_id, datas):
+    partitions = list(chunks(range(len(datas)), len(datas)/trainers))
+
+    data = []
+
+    for id in partitions[trainer_id]:
+        data.append(datas[id])
+
+    return data
+
+
 def cluster_train(learning_rate, batch_size, num_passes, model_save_dir='model'):
     class_dim = 102
     image_shape = [3, 224, 224]
@@ -294,21 +318,31 @@ def cluster_train(learning_rate, batch_size, num_passes, model_save_dir='model')
         args.device_id)
     exe = fluid.Executor(place)
 
-    pport = os.getenv("PADDLE_INIT_PSERVER_PORT", "6174")
-    tport = os.getenv("PADDLE_INIT_TRAINER_PORT", "6174")
-    pserver_ips = os.getenv("PADDLE_INIT_PSERVERS")  # ip,ip...
-    eplist = []
-    for ip in pserver_ips.split(","):
-        eplist.append(':'.join([ip, pport]))
-    pserver_endpoints = ",".join(eplist)  # ip:port,ip:port...
-    trainers = int(os.getenv("TRAINERS"))
-    trainer_id = int(os.getenv("PADDLE_INIT_TRAINER_ID"))
-    training_role = os.getenv("TRAINING_ROLE", "TRAINER")
+    standalone = int(os.getenv("STANDALONE", 0))
 
-    if training_role == "PSERVER":
-        current_endpoint =  os.getenv("POD_IP") + ":" + pport
+    if standalone:
+        pserver_endpoints = os.getenv("PSERVERS")
+        trainers = int(os.getenv("TRAINERS"))
+        current_endpoint = os.getenv("SERVER_ENDPOINT")
+        trainer_id = int(os.getenv("PADDLE_INIT_TRAINER_ID"))
+        training_role = os.getenv("TRAINING_ROLE", "TRAINER")
+
     else:
-        current_endpoint =  os.getenv("POD_IP") + ":" + tport
+        pport = os.getenv("PADDLE_INIT_PSERVER_PORT", "6174")
+        tport = os.getenv("PADDLE_INIT_TRAINER_PORT", "6174")
+        pserver_ips = os.getenv("PADDLE_INIT_PSERVERS")  # ip,ip...
+        eplist = []
+        for ip in pserver_ips.split(","):
+            eplist.append(':'.join([ip, pport]))
+        pserver_endpoints = ",".join(eplist)  # ip:port,ip:port...
+        trainers = int(os.getenv("TRAINERS"))
+        trainer_id = int(os.getenv("PADDLE_INIT_TRAINER_ID"))
+        training_role = os.getenv("TRAINING_ROLE", "TRAINER")
+
+        if training_role == "PSERVER":
+            current_endpoint =  os.getenv("POD_IP") + ":" + pport
+        else:
+            current_endpoint =  os.getenv("POD_IP") + ":" + tport
 
     print("pserver_endpoints: {0}, trainers: {1}, current_endpoint: {2}, trainer_id: {3}, training_role: {4}".format(pserver_endpoints, trainers,current_endpoint,trainer_id,training_role))
 
@@ -345,29 +379,37 @@ def cluster_train(learning_rate, batch_size, num_passes, model_save_dir='model')
     
         train_pass_acc_evaluator = fluid.average.WeightedAverage()
         test_pass_acc_evaluator = fluid.average.WeightedAverage()
-        with profiler.profiler(args.device, 'total', "profilers.log"):
-            for pass_id in range(num_passes):
-                start = time.clock()
-                train_pass_acc_evaluator.reset()
-                for batch_id, data in enumerate(train_reader()):
-                    loss, acc, size = exe.run(
-                        train_proc,
-                        feed=feeder.feed(data),
-                        fetch_list=[avg_cost, b_acc_var, b_size_var])
-                    train_pass_acc_evaluator.add(value=acc, weight=size)
-                    print("Pass {0}, batch {1}, loss {2}, acc {3}".format(
-                        pass_id, batch_id, loss[0], acc[0]))
-    
-                test_pass_acc_evaluator.reset()
-                for data in test_reader():
-                    acc, size = exe.run(
-                        inference_program,
-                        feed=feeder.feed(data),
-                        fetch_list=[b_acc_var, b_size_var])
-                    test_pass_acc_evaluator.add(value=acc, weight=size)
-                print("End pass {0}, train_acc {1}, test_acc {2}, cost {3} second".format(
-                   pass_id,
-                   train_pass_acc_evaluator.eval(), test_pass_acc_evaluator.eval(), time.clock() - start))
+
+        # with profiler.profiler(args.device, 'total', "profilers.log"):
+
+        for pass_id in range(num_passes):
+            start = time.clock()
+            train_pass_acc_evaluator.reset()
+            for batch_id, data in enumerate(train_reader()):
+
+                if args.accuracy: 
+                    data = accuracy_data(trainers, trainer_id, data)
+
+                loss, acc, size = exe.run(
+                    train_proc,
+                    feed=feeder.feed(data),
+                    fetch_list=[avg_cost, b_acc_var, b_size_var])
+                train_pass_acc_evaluator.add(value=acc, weight=size)
+                print("Pass {0}, batch {1}, loss {2}, acc {3}".format(
+                    pass_id, batch_id, loss[0], acc[0]))
+
+            test_pass_acc_evaluator.reset()
+            for data in test_reader():
+                acc, size = exe.run(
+                    inference_program,
+                    feed=feeder.feed(data),
+                    fetch_list=[b_acc_var, b_size_var])
+                test_pass_acc_evaluator.add(value=acc, weight=size)
+            print("End pass {0}, train_acc {1}, test_acc {2}, cost {3} second".format(
+               pass_id,
+               train_pass_acc_evaluator.eval(), test_pass_acc_evaluator.eval(), 
+               time.clock() - start))
+
 
 def print_arguments():
     print('-----------  Configuration Arguments -----------')
