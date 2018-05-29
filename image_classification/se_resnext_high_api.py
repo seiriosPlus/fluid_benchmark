@@ -220,8 +220,8 @@ def get_reader():
 
 def train():
 
-    ckpt_config = fluid.CheckpointConfig(checkpoint_dir = "/workspace/ckpt");
-    ckpt_config.to_string()
+    ckpt_config = fluid.CheckpointConfig(checkpoint_dir = "/workspace/ckpt", max_num_checkpoints = 2)
+        #param_path="/workspace/models",
 
     trainer = fluid.Trainer(
         train_func=train_network,
@@ -236,17 +236,24 @@ def train():
             pass
 
         if isinstance(event, fluid.EndStepEvent):
+
+            if event.step == 51:
+                trainer.save_params("/workspace/models")
+
+            if event.step == 61:
+                print "Stop the World ..."
+                trainer.stop()
+
             loss, acc1, acc5 = event.metrics
             print("Epoch {0}, Step {1}, loss {2}, \
                 acc1 {3}, acc5 {4} time {5}".format(event.epoch,
-                event.step, loss[0], acc1[0], acc5[0], "%2.2f sec" % 0.00))   
+                event.step, loss[0], acc1[0], acc5[0], "%2.2f sec" % 0.00))
 
-
-    trainer.train(reader=train_reader, num_epochs=100, event_handler=event_handler, feed_order=['image', 'label'])
+    trainer.train(reader=train_reader, num_epochs=1, 
+                                event_handler=event_handler, feed_order=['image', 'label'])
 
 
 if __name__ == '__main__':
-
     standalone = int(os.getenv("STANDALONE", 0))
     batch_size = int(sys.argv[1]) 
     optimize_choose = int(sys.argv[2])
@@ -276,8 +283,6 @@ if __name__ == '__main__':
     use_nccl = True
     # layers: 50, 152
     layers = 50
-
-    print "Init arguments ..."
 
     print "Start  Train ..."
     train()
