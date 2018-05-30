@@ -220,7 +220,7 @@ def get_reader():
 
 def train():
 
-    ckpt_config = fluid.CheckpointConfig(checkpoint_dir = "/workspace/ckpt", max_num_checkpoints = 2)
+    ckpt_config = fluid.CheckpointConfig(checkpoint_dir="/workspace/ckpt", max_num_checkpoints=2)
 
     trainer = fluid.Trainer(
         train_func=train_network,
