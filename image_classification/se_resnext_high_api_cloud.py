@@ -30,6 +30,7 @@ optimize_choose = 2
 checkpoint_hdfs_dir=None
 checkpoint_dir=None
 model_dir="init_model_path"
+serials = []
 
 
 def conv_bn_layer(input, num_filters, filter_size, stride=1, groups=1,
@@ -218,24 +219,29 @@ def get_reader():
 
 
 def put_ckpt_hdfs():
-    print "put %s to %s" % (checkpoint_dir, checkpoint_hdfs_dir)
     serial = fluid.io.get_latest_checkpoint_serial(checkpoint_dir)
-    if serial < 0:
-        print "serial: %s, there is no need to put to hdfs." % serial
+    if serial < 0 or serial in serials:
+        print "serial: %s, no need to put to hdfs." % serial
+        return
     dirname = fluid.io._get_serial_dir(checkpoint_dir, serial)
     print "serial: %s, will put %s to hdfs." % (serial, dirname)
+    command = "sh /root/paddlejob/tools/ckpt.sh put_ckpt_to_hdfs %s %s" % (dirname, checkpoint_hdfs_dir)
+    os.system(command)
+    serials.append(serial)
 
 def get_ckpt_hdfs():
     print "get %s from %s" % (checkpoint_hdfs_dir, checkpoint_dir)
+    command = "sh /root/paddlejob/tools/ckpt.sh get_ckpt_from_hdfs %s %s" % (checkpoint_dir, checkpoint_hdfs_dir)
+    os.system(command)
 
 def get_ckpt_config():
     if not checkpoint_hdfs_dir:
         return None
     get_ckpt_hdfs()
 
-    max_num = os.getenv("CHECKPOINT_MAX_NUM", 3)
-    epoch_interval = os.getenv("CHECKPOINT_EPOCH_INTERVAL", 1)
-    step_interval = os.getenv("CHECKPOINT_STEP_INTERVAL", 10)
+    max_num = int(os.getenv("CHECKPOINT_MAX_NUM", 3))
+    epoch_interval = int(os.getenv("CHECKPOINT_EPOCH_INTERVAL", 1))
+    step_interval = int(os.getenv("CHECKPOINT_STEP_INTERVAL", 10))
     config = fluid.CheckpointConfig(checkpoint_dir, max_num, epoch_interval, step_interval)
     return config
 
