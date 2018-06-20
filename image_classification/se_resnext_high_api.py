@@ -241,7 +241,7 @@ def train():
             print("Epoch {0}, Step {1}, loss {2}, acc1 {3}, acc5 {4} time {5}".format(
                 event.epoch,event.step, loss[0], acc1[0], acc5[0], "%2.2f sec" % 0.00))
 
-    trainer.train(reader=train_reader, num_epochs=1, 
+    trainer.train(reader=train_reader, num_epochs=conf.num_passes, 
                                 event_handler=event_handler, feed_order=['image', 'label'])
     trainer.save_params("/workspace/models")
 

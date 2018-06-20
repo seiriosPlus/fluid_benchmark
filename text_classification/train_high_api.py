@@ -68,11 +68,13 @@ def inference_network(dict_dim):
 
 
 def train_network(dict_dim):
-    out = inference_network(dict_dim)
-    label = fluid.layers.data(name='label', shape=[1], dtype='int64')
-    cost = fluid.layers.cross_entropy(input=out, label=label)
-    avg_cost = fluid.layers.mean(x=cost)
-    return [avg_cost]
+    def true_nn():
+        out = inference_network(dict_dim)
+        label = fluid.layers.data(name='label', shape=[1], dtype='int64')
+        cost = fluid.layers.cross_entropy(input=out, label=label)
+        avg_cost = fluid.layers.mean(x=cost)
+        return [avg_cost]
+    return true_nn
 
 
 def conv_net(
@@ -116,18 +118,22 @@ def train(dict_path):
     word_dict, dict_dim = get_worddict(dict_path)
     print("[get_worddict] The dictionary size is : %d" % dict_dim)
 
-    train_reader, test_reader = get_reader(word_dict)
+    train_reader, _ = get_reader(word_dict)
     trainer = fluid.Trainer(
         train_func=train_network(dict_dim),
         place=get_place(),
-        optimizer=get_optimizer())
+        optimizer_func=get_optimizer)
 
+    step_start_time = time.time()
     def event_handler(event):
         if isinstance(event, fluid.BeginStepEvent):
-            pass
+            global step_start_time
+            step_start_time = time.time() 
         if isinstance(event, fluid.EndStepEvent):
             loss, = event.metrics
-            print("Epoch {0}, Step {1}, loss {2}".format(event.epoch,event.step, loss[0]))
+            step_end_time = time.time()
+            if event.step and event.step % conf.log_period == 0:
+                print("Epoch {0}, Step {1}, loss {2}, time {3}".format(event.epoch, event.step, loss[0], step_end_time-step_start_time))
 
     trainer.train(reader=train_reader, num_epochs=1, 
                                 event_handler=event_handler, feed_order=['words', 'label'])
@@ -136,3 +142,6 @@ def train(dict_path):
 if __name__ == '__main__':
     args = parse_args()
     train(args.dict_path)
+
+    ## RUN SCRIPT ##
+    # python train_highlevel_api.py --dict_path /root/.cache/paddle/dataset/imdb/imdb.vocab
