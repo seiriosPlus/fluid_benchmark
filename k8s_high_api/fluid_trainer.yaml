@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: mobilenet-trainer
+spec:
+  parallelism: 4
+  completions: 4 
+  template:
+    metadata:
+      labels:
+        paddle-job: mobilenet
+    spec:
+      imagePullSecrets:
+      - name: tangwei12 
+      hostNetwork: true
+      serviceAccountName: paddle
+      containers:
+      - name: trainer
+        image: "registry.baidu.com/tangwei12/models:ckpt"
+        imagePullPolicy: Always
+        command: ["paddle_k8s", "start_fluid"]
+        ports:
+        - name: jobport-31236
+          containerPort: 31236
+        env:
+        - name: GLOG_v
+          value: "1"
+        - name: GLOG_logtostderr
+          value: "1"
+        - name: PADDLE_JOB_NAME
+          value: mobilenet
+        - name: TRAINING_ROLE
+          value: "TRAINER"
+        - name: TRAINERS
+          value: "4"
+        - name: PSERVERS
+          value: "4"
+        - name: ENTRY
+          value: "python /models/ ... "
+        - name: PADDLE_INIT_PSERVER_PORT
+          value: "30236"
+        - name: LD_LIBRARY_PATH
+          value: "/usr/local/lib:/usr/local/nvidia/lib64"
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: "metadata.namespace"
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: "status.podIP"
+        resources:
+          requests:
+            memory: 40Gi
+            cpu: 4 
+          limits:
+            memory: 40Gi
+            cpu: 4
+      restartPolicy: Never

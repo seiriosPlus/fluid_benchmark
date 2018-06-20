@@ -1,0 +1,57 @@
+apiVersion: extensions/v1beta1
+kind: ReplicaSet
+metadata:
+  name: mobilenet-pserver
+spec:
+  replicas: 4 
+  template:
+    metadata:
+      labels:
+        paddle-job-pserver: mobilenet
+    spec:
+      hostNetwork: true
+      serviceAccountName: paddle
+      imagePullSecrets:
+      - name: tangwei12
+      containers:
+      - name: pserver
+        image: "registry.baidu.com/tangwei12/models:ckpt"
+        imagePullPolicy: Always
+        ports:
+        - name: jobport-30236
+          containerPort: 30236
+        env:
+        - name: GLOG_v 
+          value: "2"
+        - name: GLOG_logtostderr
+          value: "1"
+        - name: PADDLE_JOB_NAME
+          value: mobilenet
+        - name: TRAINING_ROLE
+          value: "PSERVER"
+        - name: TRAINERS
+          value: "4"
+        - name: PSERVERS
+          value: "4"
+        - name: ENTRY
+          value: "python /models/ ... "
+        - name: PADDLE_INIT_PSERVER_PORT
+          value: "30236"
+        - name: LD_LIBRARY_PATH
+          value: "/usr/local/lib:/usr/local/nvidia/lib64"
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: "metadata.namespace"
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: "status.podIP"
+        command: ["paddle_k8s", "start_fluid"]
+        resources:
+          requests:
+            memory: 40Gi
+            cpu: 4
+          limits:
+            memory: 40Gi
+            cpu: 4

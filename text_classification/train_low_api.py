@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Text classication benchmark in Fluid"""
+"""Text classification benchmark in Fluid"""
 import numpy as np
 import sys
 import os
@@ -22,7 +22,7 @@ import paddle
 import paddle.fluid as fluid
 import paddle.fluid.profiler as profiler
 
-from config import text_classication_config as conf
+from config import text_classifacation_config as conf
 
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):

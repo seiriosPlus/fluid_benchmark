@@ -7,4 +7,4 @@ class TrainConfig():
         self.num_passes = num_passes
         self.log_period = log_period
 
-text_classication_config = TrainConfig()
+text_classification_config = TrainConfig()
