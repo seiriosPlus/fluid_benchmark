@@ -21,7 +21,20 @@ import time
 import paddle
 import paddle.fluid as fluid
 
+from visualdl import LogWriter
+
 from config import text_classification_config as conf
+
+
+# create VisualDL logger and directory
+logdir = "./tmp"
+logwriter = LogWriter(logdir, sync_cycle=10)
+
+# create 'train' run
+with logwriter.mode("train") as writer:
+    # create 'loss' scalar tag to keep track of loss function
+    loss_scalar = writer.scalar("loss")
+
 
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -124,18 +137,23 @@ def train(dict_path):
         place=get_place(),
         optimizer_func=get_optimizer)
 
-    step_start_time = time.time()
     def event_handler(event):
+        global step_start_time, global_step
+
         if isinstance(event, fluid.BeginStepEvent):
-            global step_start_time
+            if event.epoch == 0 and event.step == 0:
+                global_step = 0
             step_start_time = time.time() 
         if isinstance(event, fluid.EndStepEvent):
             loss, = event.metrics
+            global_step+=1
+            loss_scalar.add_record(global_step, loss)
+
             step_end_time = time.time()
             if event.step and event.step % conf.log_period == 0:
-                print("Epoch {0}, Step {1}, loss {2}, time {3}".format(event.epoch, event.step, loss[0], step_end_time-step_start_time))
+                print("Epoch {0}, Step {1}, loss {2}, time {3}, global step {4}".format(event.epoch, event.step, loss[0], step_end_time-step_start_time, global_step))
 
-    trainer.train(reader=train_reader, num_epochs=1, 
+    trainer.train(reader=train_reader, num_epochs=conf.num_passes, 
                                 event_handler=event_handler, feed_order=['words', 'label'])
 
 
