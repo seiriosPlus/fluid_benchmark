@@ -21,7 +21,20 @@ import time
 import paddle
 import paddle.fluid as fluid
 
+from visualdl import LogWriter
+
 from config import text_classification_config as conf
+
+
+# create VisualDL logger and directory
+logdir = "./tmp"
+logwriter = LogWriter(logdir, sync_cycle=10)
+
+# create 'train' run
+with logwriter.mode("train") as writer:
+    # create 'loss' scalar tag to keep track of loss function
+    loss_scalar = writer.scalar("loss")
+
 
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -131,6 +144,9 @@ def train(dict_path):
             step_start_time = time.time() 
         if isinstance(event, fluid.EndStepEvent):
             loss, = event.metrics
+
+            loss_scalar.add_record(event.step, loss)
+
             step_end_time = time.time()
             if event.step and event.step % conf.log_period == 0:
                 print("Epoch {0}, Step {1}, loss {2}, time {3}".format(event.epoch, event.step, loss[0], step_end_time-step_start_time))
