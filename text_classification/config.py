@@ -1,5 +1,12 @@
+
+import os
+
+
 class TrainConfig():
-    def __init__(self, batch_size=4, learning_rate=1e-3, use_gpu=False, num_passes=10, log_period=1):
+    def __init__(self, batch_size=4, learning_rate=1e-3, num_passes=10, log_period=1):
+
+        use_gpu =  True if os.getenv("PADDLE_USE_GPU") == "True" else False
+ 
         self.batch_size = batch_size
         self.learning_rate = learning_rate
         self.use_gpu = use_gpu

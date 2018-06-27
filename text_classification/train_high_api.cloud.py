@@ -23,6 +23,7 @@ import paddle.fluid as fluid
 
 from config import text_classification_config as conf
 
+
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
         return True
@@ -54,14 +55,6 @@ def get_reader(word_dict):
     test_reader = paddle.batch(paddle.reader.shuffle(paddle.dataset.imdb.test(word_dict), buf_size=51200), batch_size=conf.batch_size)
 
     return train_reader, test_reader
-
-    ## The training data set.
-    #train_reader =  paddle.batch(paddle.dataset.imdb.train(word_dict), batch_size=conf.batch_size) 
-
-    ## The testing data set.
-    #test_reader = paddle.batch(paddle.dataset.imdb.test(word_dict), batch_size=conf.batch_size)
-
-    #return train_reader, test_reader
 
 def get_optimizer():
     sgd_optimizer = fluid.optimizer.SGD(learning_rate=conf.learning_rate)
@@ -136,45 +129,71 @@ def as_numpy(tensor):
     return np.array(tensor)
 
 
+
 def train(dict_path):
     word_dict, dict_dim = get_worddict(dict_path)
     print("[get_worddict] The dictionary size is : %d" % dict_dim)
 
-    #cfg = fluid.CheckpointConfig(checkpoint_dir="/tmp/ckpt/", epoch_interval=2, step_interval=100)
-    cfg = None
+    training_role = os.getenv("PADDLE_TRAINING_ROLE", "")
+    if training_role == "PSERVER":
+        train_reader = None
+        test_reader = None
+    else:
+        train_reader, test_reader = get_reader(word_dict)
 
     trainer = fluid.Trainer(
         train_func=train_network(dict_dim),
         place=get_place(),
-        parallel=False,
-        optimizer_func=get_optimizer,
-        checkpoint_config = cfg)
+        parallel=True,
+        optimizer_func=get_optimizer)
 
-    step_start_time = time.time()
     def event_handler(event):
+        samples = 25000
+        global step_start_time, epoch_start_time, speeds
+        global accuracies, losses, t_accuracies, t_losses
+
+        if isinstance(event, fluid.BeginEpochEvent):
+            epoch_start_time = time.time()
+            losses = []
+            accuracies = []
+            t_losses = []
+            t_accuracies = []
+
         if isinstance(event, fluid.BeginStepEvent):
-            global step_start_time
-            step_start_time = time.time() 
+            if event.epoch == 0 and event.step == 0:
+                speeds = []
+            step_start_time = time.time()
+
         if isinstance(event, fluid.EndStepEvent):
-           loss,acc = as_numpy(event.metrics)
-           print("parallel executor: loss: {}, type: {}".format(loss, type(loss)))
-           step_end_time = time.time()
-           if event.step and event.step % conf.log_period == 0:
-               print("Epoch {0}, Step {1}, loss {2}, acc {3} time {4}".format(event.epoch, event.step, loss.mean(), acc.mean(), step_end_time-step_start_time))
+            loss, accuracy = as_numpy(event.metrics)
+            losses.append(loss.mean())
+            accuracies.append(accuracy.mean())
 
-            # loss,acc = event.metrics
-            # # print("general  executor: loss: {}, type: {}".format(loss, type(loss)))
-            # step_end_time = time.time()
-            # if event.step and event.step % conf.log_period == 0:
-            #     print("Epoch {0}, Step {1}, loss {2}, acc {3} time {4}".format(event.epoch, event.step, loss.mean(), acc.mean(), step_end_time-step_start_time))
+            t_loss, t_accuracy = trainer.test(reader=test_reader, feed_order=['words', 'label'])
+            t_losses.append(t_loss.mean())
+            t_accuracies.append(t_accuracy.mean())
 
-    train_reader, _ = get_reader(word_dict)
-    trainer.train(reader=train_reader, num_epochs=conf.num_passes, event_handler=event_handler, feed_order=['words', 'label'])
+        if isinstance(event, fluid.EndEpochEvent):
+            epoch_end_time = time.time()
+            time_consuming = epoch_end_time-epoch_start_time
+            speed = samples/time_consuming
+            speeds.append(speed)
+
+            print("Epoch: {0},Time: {1},  Speed: {2}, Avg Speed: {3}, Avg Loss: {4}, Avg accuracy: {5}".format(
+                event.epoch, time_consuming, speed, 
+                np.array(speeds).mean(),
+                np.array(losses).mean(),
+                np.array(accuracies).mean()))
+
+            print("Epoch: {0},Test Avg Loss: {1}, Test Avg accuracy: {2}".format(
+                event.epoch,  
+                np.array(t_losses).mean(),
+                np.array(t_accuracies).mean()))
+
+    trainer.train(reader=train_reader, num_epochs=conf.num_passes, 
+                                event_handler=event_handler, feed_order=['words', 'label'])
 
 
 if __name__ == '__main__':
     args = parse_args()
     train(args.dict_path)
-
-    ## RUN SCRIPT ##
-    # python train_highlevel_api.py --dict_path /root/.cache/paddle/dataset/imdb/imdb.vocab
