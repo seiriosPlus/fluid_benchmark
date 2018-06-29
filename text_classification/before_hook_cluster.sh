@@ -27,17 +27,4 @@ fi
 echo "****  PaddleCloud Thridparty Install PaddlePaddle END***"
 echo ""
 
-
-echo "********  Rename Cluster Env to PaddleFluid Env ********"
-
-export PADDLE_TRAINING_ROLE=$TRAINING_ROLE
-export PADDLE_PSERVER_PORT=$PADDLE_PORT
-export PADDLE_PSERVER_IPS=$PADDLE_PSERVERS
-export PADDLE_TRAINERS=$PADDLE_TRAINERS_NUM
-export PADDLE_CURRENT_IP=$POD_IP
-export PADDLE_TRAINER_ID=$PADDLE_TRAINER_ID
-
-echo "******  Rename Cluster Env to PaddleFluid Env END ******"
-echo ""
-
 echo "****************** FINISH  ALL ***********************"

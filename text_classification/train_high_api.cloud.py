@@ -57,8 +57,10 @@ def get_reader(word_dict):
     return train_reader, test_reader
 
 def get_optimizer():
-    sgd_optimizer = fluid.optimizer.SGD(learning_rate=conf.learning_rate)
-    return sgd_optimizer
+    #optimizer = fluid.optimizer.SGD(learning_rate=conf.learning_rate)
+    optimizer = fluid.optimizer.Adagrad(learning_rate=conf.learning_rate)
+
+    return optimizer
 
 
 def inference_network(dict_dim):
@@ -129,7 +131,6 @@ def as_numpy(tensor):
     return np.array(tensor)
 
 
-
 def train(dict_path):
     word_dict, dict_dim = get_worddict(dict_path)
     print("[get_worddict] The dictionary size is : %d" % dict_dim)
@@ -193,7 +194,27 @@ def train(dict_path):
     trainer.train(reader=train_reader, num_epochs=conf.num_passes, 
                                 event_handler=event_handler, feed_order=['words', 'label'])
 
+def env_declar():
+    print("********  Rename Cluster Env to PaddleFluid Env ********")
+
+    if os.environ["IS_LOCAL"] != "1":
+        os.environ["PADDLE_TRAINING_ROLE"]=os.environ["TRAINING_ROLE"]
+        os.environ["PADDLE_PSERVER_PORT"]=os.environ["PADDLE_PORT"]
+        os.environ["PADDLE_PSERVER_IPS"]=os.environ["PADDLE_PSERVERS"]
+        os.environ["PADDLE_TRAINERS"]      =os.environ["PADDLE_TRAINERS_NUM"]
+        os.environ["PADDLE_CURRENT_IP"] =os.environ["POD_IP"]
+        os.environ["PADDLE_TRAINER_ID"] =os.environ["PADDLE_TRAINER_ID"]
+        os.environ["PADDLE_SYNC_MODE"] = conf.sync_mode
+
+    print "Content-Type: text/plain\n\n"
+    for key in os.environ.keys():
+        print "%30s %s \n" % (key,os.environ[key])
+
+    print("******  Rename Cluster Env to PaddleFluid Env END ******")
+
 
 if __name__ == '__main__':
+    env_declar()
+
     args = parse_args()
     train(args.dict_path)

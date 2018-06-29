@@ -21,19 +21,19 @@ then
     do
         cur_port=${PADDLE_PSERVER_PORT_ARRAY[$i]}
         echo "PADDLE WILL START PSERVER "$cur_port
-        CUR_PORT=$cur_port PADDLE_TRAINER_ID=$i stdbuf -oL python /models/image_classification/se_resnext_high_api.py 4 2 0 CPU 0 1 0 &> pserver.$i &
+        CUR_PORT=$cur_port PADDLE_TRAINER_ID=$i stdbuf -oL python clou.py --dict_path /root/.cache/paddle/dataset/imdb/imdb.vocab &> pserver.$i &
     done
 fi
 
 if [ "$1" = "tr" ]
 then
     export PADDLE_TRAINING_ROLE=TRAINER
-    export GLOG_v=0
+    export GLOG_v=4
     export GLOG_logtostderr=1
 
     for((i=0;i<$PADDLE_TRAINERS;i++))
     do
         echo "PADDLE WILL START Trainer "$i
-        PADDLE_TRAINER_ID=$i stdbuf -oL python /models/image_classification/se_resnext_high_api.py 4 2 0 CPU 0 1 0 &> trainerlog.$i &
+        PADDLE_TRAINER_ID=$i stdbuf -oL python clou.py --dict_path /root/.cache/paddle/dataset/imdb/imdb.vocab &> trainerlog.$i &
     done
 fi

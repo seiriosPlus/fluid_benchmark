@@ -47,8 +47,8 @@ WARNING: _dist_transpile_if_necessary need to rewrite codes to accept cluster_2x
             t.transpile(
                 trainer_id, pservers=pserver_endpoints, trainers=trainers)
             if training_role == "PSERVER":
-                if self.checkpoint:
-                    self.checkpoint.is_pserver = True
+                if self.checkpoint_cfg:
+                    self.checkpoint_cfg.is_pserver = True
                 # the IP of the local machine, needed by pserver only
                 current_endpoint = ip+":"+os.getenv("CUR_PORT")
 
