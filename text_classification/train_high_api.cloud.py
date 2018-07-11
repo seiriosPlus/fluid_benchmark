@@ -42,6 +42,7 @@ def parse_args():
         help="Path of the word dictionary.")
     return parser.parse_args()
 
+
 def get_place():
     place = fluid.core.CPUPlace() if not conf.use_gpu else fluid.core.CUDAPlace(0)
     return place
@@ -55,6 +56,7 @@ def get_reader(word_dict):
     test_reader = paddle.batch(paddle.reader.shuffle(paddle.dataset.imdb.test(word_dict), buf_size=51200), batch_size=conf.batch_size)
 
     return train_reader, test_reader
+
 
 def get_optimizer():
     #optimizer = fluid.optimizer.SGD(learning_rate=conf.learning_rate)
@@ -204,7 +206,7 @@ def env_declar():
         os.environ["PADDLE_TRAINERS"]      =os.environ["PADDLE_TRAINERS_NUM"]
         os.environ["PADDLE_CURRENT_IP"] =os.environ["POD_IP"]
         os.environ["PADDLE_TRAINER_ID"] =os.environ["PADDLE_TRAINER_ID"]
-        os.environ["PADDLE_SYNC_MODE"] = conf.sync_mode
+        os.environ["PADDLE_SYNC_MODE"] = os.environ["PADDLE_SYNC_MODE"]
 
     print "Content-Type: text/plain\n\n"
     for key in os.environ.keys():
